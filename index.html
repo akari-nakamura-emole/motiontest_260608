@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kachinko Three.js</title>
+  <style>
+    html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    }
+    canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.179.1/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.179.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const scene = new THREE.Scene();
+
+// 背景は透明。反射用の環境だけ入れる。
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  alpha: true
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.13;
+//HDRI環境の露出量調整
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+
+
+
+// HDRI代わりの軽いスタジオ環境。背景には表示せず、反射だけに使う。
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+const environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environment = environment;
+scene.background = null;
+
+/*
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+
+new RGBELoader()
+  .load('./ferndale_studio_07_4k.hdr', (hdrTexture) => {
+
+    hdrTexture.mapping =
+      THREE.EquirectangularReflectionMapping;
+
+    const envMap =
+      pmremGenerator.fromEquirectangular(hdrTexture).texture;
+
+    scene.environment = envMap;
+
+    // 背景は透明のまま
+    scene.background = null;
+
+    hdrTexture.dispose();
+    pmremGenerator.dispose();
+
+  });
+
+*/
+
+
+// Three.js Editorから抜いたカメラ設定
+const camera = new THREE.PerspectiveCamera(
+  50,
+  window.innerWidth / window.innerHeight,
+  0.001,
+  10000000000
+);
+
+const cameraMatrix = new THREE.Matrix4();
+cameraMatrix.fromArray([
+  0.8121499245167734, -1.3877787807814457e-17, -0.5834487981883237, 0,
+  0.16722063092277578, 0.9580481764801695, 0.2327680221525519, 0,
+  0.55897205717387, -0.2866072077653004, 0.778078754211802, 0,
+  0.5920542185284701, -0.26978479626060553, 0.6780736284199345, 1
+]);
+cameraMatrix.decompose(camera.position, camera.quaternion, camera.scale);
+camera.updateProjectionMatrix();
+
+// Editorのライト設定に近いもの
+const ambientLight = new THREE.AmbientLight(0x222222, 0.2);
+scene.add(ambientLight);
+
+// JSON上のDirectionalLightは intensity 0 だったので、基本は環境光メイン。
+// ただし環境だけだと暗い時用に、かなり弱い補助ライトを入れておく。
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.25);
+directionalLight.position.set(1.155, -0.697, 0.837);
+scene.add(directionalLight);
+
+let model;
+let emptyAll;
+let emptyUpper;
+let scrollProgress = 0;
+let studioScrollProgress = 0;
+
+const loader = new GLTFLoader();
+
+loader.load(
+  './scene.glb',
+  (gltf) => {
+    model = gltf.scene;
+    scene.add(model);
+
+    emptyAll = model.getObjectByName('empty_kachinko_all');
+    emptyUpper = model.getObjectByName('empty_kachinko_upper');
+
+    // 念のため、GLB内マテリアルの描画設定をWeb向けに補正
+    model.traverse((obj) => {
+      if (obj.isMesh) {
+        obj.castShadow = true;
+        obj.receiveShadow = true;
+
+        if (obj.material) {
+          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+          materials.forEach((mat) => {
+            mat.side = THREE.DoubleSide;
+            mat.needsUpdate = true;
+          });
+        }
+      }
+    });
+
+    if (!emptyAll) console.warn('empty_kachinko_all が見つかりません');
+    if (!emptyUpper) console.warn('empty_kachinko_upper が見つかりません');
+  },
+  undefined,
+  (error) => {
+    console.error('GLB load error:', error);
+  }
+);
+
+function animate(time) {
+  requestAnimationFrame(animate);
+
+  const t = time * 0.001;
+
+  // Three.js Editorの empty_kachinko_all の update を移植
+  if (emptyAll) {
+
+  emptyAll.position.y =
+    Math.sin(t * 1.4) * 0.025;
+
+  emptyAll.rotation.z =
+    Math.sin(t * 0.9) * 0.035;
+
+  emptyAll.rotation.y =
+  studioScrollProgress * Math.PI * 2;
+
+}
+
+  // Three.js Editorの empty_kachinko_upper の update を移植
+  if (emptyUpper) {
+    const base = THREE.MathUtils.degToRad(9);
+    const swing = THREE.MathUtils.degToRad(5);
+    emptyUpper.rotation.z = base + Math.sin(t * 1.8) * swing;
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate(0);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+window.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "studioScroll") {
+    studioScrollProgress = event.data.progress;
+  }
+});
+
+/*
+window.addEventListener('scroll', () => {
+
+  const maxScroll =
+    document.documentElement.scrollHeight -
+    window.innerHeight;
+
+  scrollProgress =
+    maxScroll > 0
+      ? window.scrollY / maxScroll
+      : 0;
+
+});
+*/
+
+
+</script>
+</body>
+</html>
